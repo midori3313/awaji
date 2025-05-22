@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>淡路島おでかけナビ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Visualization & Content Choices:
+        - Welcome/Intro: Text block from report's introduction. Goal: Context. Method: HTML text.
+        - Spot Listings (Rainy/Sunny/All-Weather): Filterable grid of cards. Goal: Browse & Select. Method: HTML/Tailwind cards, JS for filtering and dynamic rendering. Interaction: Click filter buttons, click cards for details.
+        - Spot Details: Modal view with comprehensive info. Goal: Inform (deep dive). Method: HTML/Tailwind, JS for display.
+        - Rainy Day Spots Overview (Chart): Bar chart showing count of spots by type (e.g., Experience, Character, Learning). Goal: Compare options. Method: Chart.js (Canvas). Data: Derived from report spot list.
+        - Sunny Day Spots Overview (Chart): Similar bar chart for sunny day spot types. Goal: Compare options. Method: Chart.js (Canvas). Data: Derived from report spot list.
+        - All-Weather Spot Comparison (Radar Chart): Comparing key all-weather spots (Nijigen no Mori, England Hill, Uzunooka, ONOKORO) on axes like Family-Friendliness, Education, Fun, Food. Goal: Detailed comparison. Method: Chart.js (Canvas). Data: Qualitative scores (1-5) assigned based on report descriptions.
+        - Food & Souvenirs: Curated list/cards of notable food items and shopping locations. Goal: Inform (culinary/shopping). Method: HTML/Tailwind.
+        - Model Itineraries: Text-based presentation of suggested plans. Goal: Guide. Method: HTML/Tailwind.
+        - CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. All visuals via HTML/CSS/Tailwind or Chart.js Canvas. -->
+    <style>
+        body {
+            font-family: 'Noto Sans JP', 'Inter', sans-serif;
+            background-color: #FFFBEB; /* bg-amber-50 */
+            color: #262626; /* text-neutral-800 */
+        }
+        .nav-button {
+            @apply px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-150;
+        }
+        .nav-button.active {
+            @apply bg-emerald-600 text-white;
+        }
+        .nav-button:not(.active) {
+            @apply text-emerald-700 hover:bg-emerald-100;
+        }
+        .filter-button {
+            @apply px-6 py-3 rounded-full text-base font-semibold shadow-md transition-transform duration-150 hover:scale-105;
+        }
+        .filter-button.active {
+            @apply bg-emerald-600 text-white ring-2 ring-emerald-700;
+        }
+        .filter-button:not(.active) {
+            @apply bg-white text-emerald-700 hover:bg-emerald-50;
+        }
+        .spot-card {
+            @apply bg-white rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl cursor-pointer;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px; /* max-w-2xl */
+            margin-left: auto;
+            margin-right: auto;
+            height: 320px; /* h-80 */
+            max-height: 400px; /* max-h-96 */
+        }
+        @media (min-width: 768px) { /* md breakpoint */
+            .chart-container {
+                height: 384px; /* h-96 */
+            }
+        }
+        .modal {
+            @apply fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center p-4 z-50 transition-opacity duration-300;
+        }
+        .modal-content {
+            @apply bg-white rounded-lg shadow-xl p-6 md:p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto;
+        }
+        .section-title {
+            @apply text-3xl font-bold text-emerald-700 mb-6 text-center;
+        }
+        .section-intro {
+            @apply text-lg text-neutral-700 mb-8 max-w-3xl mx-auto text-center;
+        }
+        .content-hidden {
+            display: none;
+        }
+        .tag {
+            @apply inline-block bg-sky-100 text-sky-700 text-xs font-semibold mr-2 px-2.5 py-0.5 rounded-full;
+        }
+        h1, h2, h3 {
+            font-family: 'Noto Sans JP', 'Inter', sans-serif;
+            color: #065F46; /* emerald-700 */
+        }
+        .prose h4 { @apply text-emerald-600 font-semibold mt-4 mb-1; }
+        .prose ul { @apply list-disc list-inside pl-4 mb-3 text-neutral-700; }
+        .prose p { @apply mb-3 text-neutral-700 leading-relaxed; }
+    </style>
+</head>
+<body>
+    <header class="bg-white shadow-md sticky top-0 z-40">
+        <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex-shrink-0">
+                    <h1 class="text-2xl font-bold text-emerald-700">淡路島おでかけナビ 🗺️</h1>
+                </div>
+                <nav class="hidden md:flex space-x-2">
+                    <button class="nav-button active" data-section="home">ホーム</button>
+                    <button class="nav-button" data-section="explore">おでかけスポット検索</button>
+                    <button class="nav-button" data-section="charts">データで見る淡路島</button>
+                    <button class="nav-button" data-section="food">グルメ & お土産</button>
+                    <button class="nav-button" data-section="itineraries">モデルプラン</button>
+                </nav>
+                <div class="md:hidden">
+                    <button id="mobile-menu-button" class="text-emerald-700 focus:outline-none">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div id="mobile-menu" class="md:hidden hidden bg-white shadow-lg">
+            <nav class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <button class="nav-button active w-full text-left" data-section="home">ホーム</button>
+                <button class="nav-button w-full text-left" data-section="explore">おでかけスポット検索</button>
+                <button class="nav-button w-full text-left" data-section="charts">データで見る淡路島</button>
+                <button class="nav-button w-full text-left" data-section="food">グルメ & お土産</button>
+                <button class="nav-button w-full text-left" data-section="itineraries">モデルプラン</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <section id="home-section" class="prose max-w-none">
+            <h2 class="section-title">淡路島へようこそ！</h2>
+            <p class="section-intro">
+                この「淡路島おでかけナビ」は、あなたの淡路島旅行を天候に左右されずに最高のものにするためのお手伝いをします。
+                豊かな自然、美味しいグルメ、楽しいアクティビティ満載の淡路島。雨の日でも晴れの日でも楽しめるスポット情報やモデルプランを通じて、あなたにぴったりの過ごし方を見つけましょう。
+            </p>
+            <div class="text-center mb-12">
+                <img src="https://placehold.co/800x400/a7f3d0/047857?text=淡路島の美しい風景" alt="淡路島の風景" class="rounded-lg shadow-lg mx-auto">
+            </div>
+            <h3 class="text-2xl font-semibold text-emerald-700 mb-4">淡路島の魅力と多様性</h3>
+            <p>淡路島は、瀬戸内海に浮かぶ美しい島で、豊かな自然、新鮮な海の幸、そして心温まるおもてなしで知られています。四季折々の花々が咲き誇る「あわじ花さじき」のような絶景スポットから、世界最大級の渦潮を間近で体験できる「うずしおクルーズ」、家族みんなで楽しめる「淡路ファームパーク イングランドの丘」まで、その魅力は尽きません。近年では、アニメや漫画の世界に浸れる「ニジゲンノモリ」のような新しいテーマパークも登場し、子供から大人まで幅広い世代の旅行者を惹きつけています。</p>
+            <p>この島の観光戦略は、単に美しい自然や美味しい食事を提供するだけでなく、天候に左右されにくい屋内施設や体験型コンテンツの充実に力を入れている点に注目すべきです。これは、淡路島が一年を通して、どんな天気でも楽しめる観光地としての魅力を高めようとしている表れと言えるでしょう。</p>
+
+            <h3 class="text-2xl font-semibold text-emerald-700 mb-4 mt-8">天候に応じたプランニングの重要性</h3>
+            <p>淡路島の多彩な魅力を余すところなく体験するためには、やはり天候を考慮したプランニングが大切です。せっかくの旅行も、雨で予定していたアクティビティが中止になってしまっては残念ですよね。このナビでは、雨の日でも、そしてもちろん晴れの日でも、淡路島を心ゆくまで楽しめるように、選りすぐりのスポットや賢い過ごし方をご提案します。</p>
+        </section>
+
+        <section id="explore-section" class="content-hidden">
+            <h2 class="section-title">おでかけスポット検索</h2>
+            <p class="section-intro">
+                今日の天気や気分に合わせて、淡路島の人気スポットを探してみましょう。「雨の日」「晴れの日」「全天候型」のボタンで絞り込み、気になるスポットを見つけてください。各スポットカードをクリックすると、詳細情報が表示されます。
+            </p>
+            <div class="flex flex-wrap justify-center gap-3 mb-10">
+                <button class="filter-button active" data-weather="all">🎉 全天候型</button>
+                <button class="filter-button" data-weather="rain">☔ 雨の日おすすめ</button>
+                <button class="filter-button" data-weather="sun">☀️ 晴れの日おすすめ</button>
+            </div>
+            <div id="spots-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            </div>
+        </section>
+
+        <section id="charts-section" class="content-hidden">
+            <h2 class="section-title">データで見る淡路島</h2>
+            <p class="section-intro">
+                淡路島の観光スポットをデータで分析！雨の日、晴れの日にどんなタイプのアクティビティが人気なのか、また全天候型スポットの特徴をチャートでご紹介します。旅の計画の参考にしてみてください。
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                <div>
+                    <h3 class="text-xl font-semibold text-emerald-700 mb-3 text-center">雨の日人気スポットカテゴリ</h3>
+                    <div class="chart-container bg-white p-4 rounded-lg shadow">
+                        <canvas id="rainyDayChart"></canvas>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold text-emerald-700 mb-3 text-center">晴れの日人気スポットカテゴリ</h3>
+                    <div class="chart-container bg-white p-4 rounded-lg shadow">
+                        <canvas id="sunnyDayChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h3 class="text-xl font-semibold text-emerald-700 mb-3 text-center">主要全天候型スポット比較</h3>
+                 <div class="chart-container bg-white p-4 rounded-lg shadow mx-auto" style="max-width: 500px;">
+                    <canvas id="allWeatherRadarChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section id="food-section" class="content-hidden prose max-w-none">
+            <h2 class="section-title">淡路島グルメ & お土産探訪</h2>
+            <p class="section-intro">
+                旅の大きな楽しみの一つは「食」。淡路島は「御食国（みけつくに）」と称された歴史を持つ食材の宝庫です。ここでは、天候を気にせず楽しめるおすすめのグルメスポットや、淡路島ならではの味覚、人気のお土産をご紹介します。
+            </p>
+            <h3 class="text-2xl font-semibold text-emerald-700 mb-4">天候を気にせず楽しめる食事処・お土産店</h3>
+            <p>淡路島の人気観光スポットの多くには、屋内で快適に食事やショッピングが楽しめるレストランやショップが併設されています。「のじまスコーラ」内には地元の食材を活かしたレストランやマルシェ、「うずの丘 大鳴門橋記念館」には絶景レストランやお土産店が充実。「道の駅うずしお」や「道の駅あわじ」といった道の駅も定番です。</p>
+
+            <h3 class="text-2xl font-semibold text-emerald-700 mb-4 mt-8">淡路島ならではの味覚</h3>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h4 class="text-xl font-semibold text-sky-700 mb-2">🧅 玉ねぎ料理</h4>
+                    <p>甘くて美味しい淡路島産玉ねぎは必食。「淡路島牛丼」、玉ねぎ丸ごと「玉ねぎつけ麺」、「島オニオンステーキバーガー」など多彩。</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h4 class="text-xl font-semibold text-sky-700 mb-2">🐟 海鮮</h4>
+                    <p>新鮮な海の幸も豊富。春～夏は「生しらす丼」、高級食材「海鮮うにしゃぶ」、新鮮ネタの「寿司」もおすすめ。</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h4 class="text-xl font-semibold text-sky-700 mb-2">🐄 淡路牛</h4>
+                    <p>きめ細やかな肉質と上品な甘みが特徴。ステーキや焼肉でとろける味わいを。</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h4 class="text-xl font-semibold text-sky-700 mb-2">🍦 スイーツ</h4>
+                    <p>「あわじ花さじき」の「びわソフトクリーム」、「パルシェ香りの館」の「ラベンダーソフトクリーム」などご当地の味も。</p>
+                </div>
+            </div>
+            <p class="mt-6">多くの観光施設や飲食店が、これらの地域資源を最大限に活用したメニューや商品を開発し、島外からの観光客に強くアピールしています。「食」を通じて淡路島のブランドイメージを確立し、地域全体の活性化に繋げようという戦略的な取り組みの表れと言えるでしょう。</p>
+
+            <h3 class="text-2xl font-semibold text-emerald-700 mb-4 mt-8">人気のお土産</h3>
+            <p>旅の思い出には淡路島ならではのお土産を。「たこせんべいの里」では様々なせんべいを試食して選べ、「パルシェ香りの館」ではハーブ製品やオリジナル香水が人気です。各テーマパークの限定グッズも見逃せません。</p>
+        </section>
+
+        <section id="itineraries-section" class="content-hidden prose max-w-none">
+            <h2 class="section-title">天候別！おすすめモデルプラン</h2>
+            <p class="section-intro">
+                雨の日でも晴れの日でも淡路島を満喫できる、おすすめのモデルプランをご提案します。もちろんこれは一例。あなたの興味や体力に合わせて自由にアレンジして、最高の淡路島体験を計画してください。
+            </p>
+            <div class="grid md:grid-cols-2 gap-8">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold text-emerald-700 mb-4">☔ 雨の日満喫プラン</h3>
+                    <ul>
+                        <li><strong>午前:</strong> 「たこせんべいの里」で試食＆工場見学。お土産選びも。</li>
+                        <li><strong>昼食:</strong> 「のじまスコーラ」の「リストランテ・スコーラ」で本格イタリアン。</li>
+                        <li><strong>午後:</strong> 「淡路夢舞台 温室 あわじグリーン館」で植物鑑賞、または「HELLO KITTY SMILE」でキャラクターと触れ合う。</li>
+                        <li><strong>夕方:</strong> 「パルシェ香りの湯」でハーブ温泉に癒される。</li>
+                    </ul>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold text-emerald-700 mb-4">☀️ 晴れの日アクティブプラン</h3>
+                    <ul>
+                        <li><strong>午前:</strong> 絶景スポット「あわじ花さじき」で花畑とパノラマビューを満喫。</li>
+                        <li><strong>昼食:</strong> 「淡路島国営明石海峡公園」周辺でランチ、または公園内でピクニック。</li>
+                        <li><strong>午後:</strong> 「ニジゲンノモリ」で屋外アトラクション体験、または「うずしおクルーズ」で迫力の渦潮を体感。</li>
+                        <li><strong>夕方:</strong> 「淡路ファームパーク イングランドの丘」で動物ふれあい＆収穫体験。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <div id="spot-modal" class="modal content-hidden opacity-0 pointer-events-none">
+            <div id="modal-content-inner" class="modal-content">
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-emerald-700 text-amber-50 py-8 mt-12 text-center">
+        <p>&copy; 2025 淡路島おでかけナビ. All rights reserved.</p>
+        <p class="text-sm mt-1">最高の淡路島体験を！</p>
+    </footer>
+
+<script>
+const spotsData = [
+    {
+        id: 'takosenbei',
+        name_jp: 'たこせんべいの里',
+        weather: ['rain', 'all'],
+        type_rain: 'experience', type_all: 'food_shop',
+        target_audience: ['family', 'friends', 'couples'],
+        description_short_jp: '約40種のせんべい試食し放題！工場見学や無料コーヒーも。',
+        description_full_jp: '淡路島土産の定番「たこせんべい」の製造工程見学と、約40種類の無料試食が楽しめる人気スポット。無料のコーヒー・お茶サービス付きの休憩スペースもあり、ドライブの立ち寄りにも最適です。',
+        activities_rain_jp: 'せんべい試食、工場見学（窓越し）、無料ドリンクサービス付き休憩',
+        hours_jp: '9:00～17:00',
+        fee_jp: '入場無料',
+        food_jp: '試食、併設売店で販売', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=たこせんべいの里',
+        key_points: ['試食豊富', '工場見学', '無料ドリンク', 'お土産に最適'],
+        rating_family: 4, rating_education: 2, rating_fun: 3, rating_food: 5, rating_uniqueness: 3
+    },
+    {
+        id: 'parchez',
+        name_jp: 'パルシェ香りの館／香りの湯',
+        weather: ['rain', 'all'],
+        type_rain: 'experience', type_all: 'relax',
+        target_audience: ['couples', 'friends', 'family'],
+        description_short_jp: '香水作り体験やハーブ温室、天然温泉で癒やしの時間を。',
+        description_full_jp: '香りをテーマにした複合施設。オリジナル香水作り、ジェルキャンドル作り等の体験や、約100種のハーブが植栽された大温室、ハーブの香る天然温泉「香りの湯」を楽しめます。カフェではハーブ料理やラベンダーソフトも人気。',
+        activities_rain_jp: '香水作り、キャンドル作り、ハーバリウム作り、ハーブ温室散策、温泉入浴',
+        hours_jp: '香りの館 9:00-17:00, 香りの湯 11:00-22:00',
+        fee_jp: '体験・温泉利用により異なる',
+        food_jp: 'カフェ「Kaoru Café & Herb Shop」、ビュッフェレストランあり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=パルシェ香りの館',
+        key_points: ['手作り体験', 'ハーブ温室', '天然温泉', '癒やし'],
+        rating_family: 3, rating_education: 3, rating_fun: 4, rating_food: 4, rating_uniqueness: 4
+    },
+    {
+        id: 'ningyoza',
+        name_jp: '淡路人形座',
+        weather: ['rain', 'all'],
+        type_rain: 'learning', type_all: 'culture',
+        target_audience: ['family', 'adults', 'culture_lovers'],
+        description_short_jp: '260年以上の歴史を誇る淡路人形浄瑠璃を鑑賞。',
+        description_full_jp: '日本の伝統芸能、淡路人形浄瑠璃を鑑賞できる劇場。精巧な人形の動き、太夫の語り、三味線の音色が織りなす総合芸術を堪能できます。公演後には人形との記念撮影も可能。',
+        activities_rain_jp: '人形浄瑠璃鑑賞、記念撮影',
+        hours_jp: '9:00～17:00 (水曜定休)',
+        fee_jp: '大人1,800円他',
+        food_jp: '周辺に飲食店あり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=淡路人形座',
+        key_points: ['伝統芸能', '人形浄瑠璃', '文化体験', '記念撮影'],
+        rating_family: 3, rating_education: 5, rating_fun: 3, rating_food: 2, rating_uniqueness: 5
+    },
+    {
+        id: 'nojima_fault',
+        name_jp: '北淡震災記念公園（野島断層保存館）',
+        weather: ['rain', 'all'],
+        type_rain: 'learning', type_all: 'education',
+        target_audience: ['family', 'students', 'adults'],
+        description_short_jp: '阪神・淡路大震災の記憶を伝える。野島断層を保存展示。',
+        description_full_jp: '1995年の阪神・淡路大震災で現れた野島断層を保存・展示。地震の揺れ体験や震災資料を通じて防災について学べる施設です。2025年3月にはカフェ併設の「AWAJI EARTH MUSEUM」もオープン予定。',
+        activities_rain_jp: '断層見学、地震体験、震災資料展示、防災学習',
+        hours_jp: '9:00～17:00',
+        fee_jp: '大人730円他',
+        food_jp: '2025年3月～カフェあり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=北淡震災記念公園',
+        key_points: ['震災学習', '断層保存', '地震体験', '防災意識'],
+        rating_family: 4, rating_education: 5, rating_fun: 2, rating_food: 3, rating_uniqueness: 4
+    },
+    {
+        id: 'hk_smile',
+        name_jp: 'HELLO KITTY SMILE',
+        weather: ['rain', 'all'],
+        type_rain: 'character', type_all: 'theme_park_indoor',
+        target_audience: ['family_kids', 'hk_fans', 'couples'],
+        description_short_jp: 'ハローキティの夢の世界！竜宮城テーマの屋内型施設。',
+        description_full_jp: '乙姫様に扮したハローキティがお出迎えする竜宮城がテーマの屋内型複合施設。プロジェクションマッピングやアート作品、グリーティング、限定ショップ、レストランが楽しめます。',
+        activities_rain_jp: 'ハローキティグリーティング、プロジェクションマッピング鑑賞、レストラン利用、グッズ購入',
+        hours_jp: '平日11:00-19:00, 土日祝10:00-19:00 (火曜定休)',
+        fee_jp: '大人1,500円他',
+        food_jp: '本格中華「GARDEN Terrace」、創作和食「竜宮レストラン玉手箱」あり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=HELLO+KITTY+SMILE',
+        key_points: ['ハローキティ', '屋内施設', 'プロジェクションマッピング', 'フォトジェニック'],
+        rating_family: 5, rating_education: 1, rating_fun: 5, rating_food: 4, rating_uniqueness: 4
+    },
+    {
+        id: 'nijigen_indoor',
+        name_jp: 'ニジゲンノモリ（屋内エリア）',
+        weather: ['rain', 'all'],
+        type_rain: 'character', type_all: 'theme_park_mixed',
+        target_audience: ['family_kids', 'anime_fans', 'youth'],
+        description_short_jp: '人気アニメの世界を体験！雨でも遊べる屋内アトラクションも。',
+        description_full_jp: '日本のアニメや漫画、ゲームの世界観を体験できるアニメパーク。「クレヨンしんちゃん」の『ふたば幼稚園』や「ゴジラ迎撃作戦」の『ゴジラミュージアム』など、屋内でも楽しめるエリアがあります。',
+        activities_rain_jp: 'クレヨンしんちゃん「ふたば幼稚園」、ゴジラミュージアム見学',
+        hours_jp: '施設・アトラクションによる', fee_jp: 'アトラクションによる',
+        food_jp: '「モリノテラス」、「ラーメン一楽」、「ルイーダの酒場」など多数', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=ニジゲンノモリ(屋内)',
+        key_points: ['アニメパーク', 'クレヨンしんちゃん', 'ゴジラ', '屋内あり'],
+        rating_family: 5, rating_education: 2, rating_fun: 5, rating_food: 4, rating_uniqueness: 5
+    },
+    {
+        id: 'awaji_greenhouse',
+        name_jp: '淡路夢舞台 温室「あわじグリーン館」',
+        weather: ['rain', 'all'],
+        type_rain: 'nature_indoor', type_all: 'relax',
+        target_audience: ['family', 'plant_lovers', 'couples'],
+        description_short_jp: '日本最大級の温室。世界の珍しい植物や花々を一年中楽しめる。',
+        description_full_jp: '建築家・安藤忠雄氏設計の「淡路夢舞台」内にある日本最大級の温室。熱帯・亜熱帯の珍しい植物や色鮮やかな花々が一年中楽しめます。子供が遊べるスペースもあり、家族連れにも人気。',
+        activities_rain_jp: '世界の植物鑑賞、子供向け遊具スペース利用',
+        hours_jp: '10:00～18:00',
+        fee_jp: '大人750円 (高校生以下無料)',
+        food_jp: '淡路夢舞台敷地内にレストラン・カフェあり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=あわじグリーン館',
+        key_points: ['大型温室', '珍しい植物', '安藤忠雄建築', '癒やし空間'],
+        rating_family: 4, rating_education: 3, rating_fun: 3, rating_food: 3, rating_uniqueness: 4
+    },
+    {
+        id: 'nojima_scuola',
+        name_jp: 'のじまスコーラ',
+        weather: ['rain', 'all'],
+        type_rain: 'experience', type_all: 'food_shop',
+        target_audience: ['family', 'gourmet_lovers', 'animal_lovers'],
+        description_short_jp: '廃校リノベ施設。マルシェ、ベーカリー、レストラン、ミニ動物園も。',
+        description_full_jp: '廃校となった野島小学校をリノベーションした複合施設。地元産品マルシェ、焼きたてパンのベーカリー、レストラン、ヤギやアルパカと触れ合えるミニ動物園（一部屋根あり）などがあります。',
+        activities_rain_jp: 'マルシェでの買い物、ベーカリー利用、レストランでの食事、ミニ動物園（一部）',
+        hours_jp: '店舗による (水曜定休多し)', fee_jp: '入場無料 (一部体験有料)',
+        food_jp: 'カフェ・スコーラ(1F)、リストランテ・スコーラ(2Fイタリアン)、のじまBBQテラス(3F季節営業)', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=のじまスコーラ',
+        key_points: ['廃校リノベーション', '地元産品', 'レストラン', 'ミニ動物園'],
+        rating_family: 5, rating_education: 3, rating_fun: 4, rating_food: 5, rating_uniqueness: 5
+    },
+    {
+        id: 'uzunooka',
+        name_jp: 'うずの丘 大鳴門橋記念館（うずしお科学館）',
+        weather: ['rain', 'sun', 'all'],
+        type_rain: 'learning', type_sun: 'scenic', type_all: 'food_shop',
+        target_audience: ['family', 'kids', 'curious_minds'],
+        description_short_jp: '渦潮を科学で学ぶ！玉ねぎUFOキャッチャーも人気。',
+        description_full_jp: '鳴門海峡と大鳴門橋の絶景を望む丘の上にある施設。「うずしお科学館」では渦潮の仕組みを学べ、屋外には巨大玉ねぎモニュメント「おっ玉葱」も。お土産店やレストランも充実。',
+        activities_rain_jp: 'うずしお科学館見学、お土産購入、レストラン利用',
+        activities_sun_jp: '展望台からの絶景鑑賞、「おっ玉葱」と記念撮影',
+        hours_jp: '9:00～17:00 (施設により異なる)', fee_jp: '科学館は有料',
+        food_jp: '絶景レストラン、カフェあり', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=うずの丘',
+        key_points: ['うずしお科学館', '絶景', '玉ねぎテーマ', 'お土産充実'],
+        rating_family: 5, rating_education: 4, rating_fun: 4, rating_food: 4, rating_uniqueness: 5
+    },
+    {
+        id: 'onokoro',
+        name_jp: '淡路ワールドパークONOKORO',
+        weather: ['rain', 'sun', 'all'],
+        type_rain: 'experience', type_sun: 'theme_park_outdoor', type_all: 'theme_park_mixed',
+        target_audience: ['family_kids', 'theme_park_lovers'],
+        description_short_jp: 'ミニチュア世界と遊園地！屋内クラフト体験も。',
+        description_full_jp: '世界の有名建築物を再現した「ミニチュアワールド」や遊園地アトラクション、ジップライン、芝すべりなどが楽しめる総合テーマパーク。雨天時はVRシューティングやクラフト体験教室も。',
+        activities_rain_jp: 'ミニチュアワールド鑑賞、VRシューティング、クラフト体験',
+        activities_sun_jp: '遊園地アトラクション、ジップライン、芝すべり',
+        hours_jp: '公式サイト参照', fee_jp: '公式サイト参照',
+        food_jp: 'レストラン「イル・マーレ」他、軽食ショップあり。お弁当持込可。', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=ONOKORO',
+        key_points: ['ミニチュアワールド', '遊園地', 'ジップライン', 'クラフト体験'],
+        rating_family: 5, rating_education: 2, rating_fun: 5, rating_food: 3, rating_uniqueness: 4
+    },
+    {
+        id: 'hanasajiki',
+        name_jp: 'あわじ花さじき',
+        weather: ['sun'],
+        type_sun: 'scenic',
+        target_audience: ['nature_lovers', 'photographers', 'couples', 'family'],
+        description_short_jp: '天空の花畑！四季折々の花と360度パノラマ絶景。',
+        description_full_jp: '標高約300mの高原に広がる花畑。四季の花々が絨毯のように咲き誇り、展望デッキからは明石海峡から大阪湾まで一望できる大パノラマが楽しめます。入場無料（駐車場有料）。',
+        activities_sun_jp: '花畑散策、展望デッキからの絶景鑑賞、写真撮影',
+        hours_jp: '9:00～17:00', fee_jp: '入園無料 (駐車場200円)',
+        food_jp: 'カフェレストランあり（びわソフト人気）。周辺にランチスポットも。', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=あわじ花さじき',
+        key_points: ['絶景花畑', 'パノラマビュー', '入場無料', '写真映え'],
+        rating_family: 4, rating_education: 1, rating_fun: 3, rating_food: 3, rating_uniqueness: 5
+    },
+    {
+        id: 'akashi_park',
+        name_jp: '淡路島国営明石海峡公園（屋外エリア）',
+        weather: ['sun'],
+        type_sun: 'park_outdoor',
+        target_audience: ['family_kids', 'active_people'],
+        description_short_jp: '大型遊具や芝生広場！一日遊べる広大な公園。',
+        description_full_jp: '明石海峡大橋を望む広大な公園。150種の遊具がある「夢っこランド」や「子どもの森」、芝生広場、水遊びエリア、バーベキューサイト（要予約）などがあり、家族で一日楽しめます。小中学生入園無料。',
+        activities_sun_jp: '大型遊具遊び、芝生広場でのピクニック、水遊び（夏季）、バーベキュー',
+        hours_jp: '9:30～17:00 (季節変動あり)', fee_jp: '大人450円 (小中学生無料)',
+        food_jp: 'レストラン「花屋敷」あり（淡路島牛丼など）。', souvenirs_jp: false,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=明石海峡公園',
+        key_points: ['大型遊具', '広大な芝生', '水遊び', 'ピクニック最適'],
+        rating_family: 5, rating_education: 2, rating_fun: 5, rating_food: 3, rating_uniqueness: 3
+    },
+    {
+        id: 'uzushio_cruise',
+        name_jp: 'うずしおクルーズ',
+        weather: ['sun', 'all'], // all because it operates in rain too, but best in sun
+        type_sun: 'cruise', type_all: 'experience',
+        target_audience: ['all_ages', 'thrill_seekers', 'nature_lovers'],
+        description_short_jp: '世界最大級の渦潮を間近で体感！迫力満点のクルーズ。',
+        description_full_jp: '鳴門海峡の渦潮を約60分のクルーズで間近に体験。福良港から出航し、渦潮ポイントへ。船上からは渦巻く潮流のほか、雄大な景色も楽しめます。見頃の時間帯確認が重要。新日本丸には船カフェもオープン予定。',
+        activities_sun_jp: '渦潮観潮、鳴門海峡の景色鑑賞',
+        activities_rain_jp: '渦潮観潮（屋根付き客室あり、雨具推奨）',
+        hours_jp: '9:00～17:00 (潮により変動)', fee_jp: '大人2,500円他',
+        food_jp: '2025年7月～船カフェオープン予定。福良港周辺に食事処多数。', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=うずしおクルーズ',
+        key_points: ['世界最大級渦潮', '迫力満点', 'クルーズ体験', '絶景'],
+        rating_family: 4, rating_education: 3, rating_fun: 5, rating_food: 3, rating_uniqueness: 5
+    },
+    {
+        id: 'nijigen_outdoor',
+        name_jp: 'ニジゲンノモリ（屋外エリア）',
+        weather: ['sun'],
+        type_sun: 'theme_park_outdoor',
+        target_audience: ['anime_fans', 'youth', 'active_family'],
+        description_short_jp: '自然の中でアニメ世界を体感！アスレチックやジップライン。',
+        description_full_jp: '広大な公園内に人気アニメ・漫画・ゲームの世界観を再現。「クレヨンしんちゃん」の巨大アスレチックやジップライン、「NARUTO＆BORUTO 忍里」の忍者修行アスレチック、「ゴジラ迎撃作戦」のジップライン＆シューティングなどスリル満点。',
+        activities_sun_jp: 'アニメテーマのアスレチック、ジップライン、立体迷路',
+        hours_jp: 'アトラクションによる', fee_jp: 'アトラクションによる',
+        food_jp: '「モリノテラス」、「ラーメン一楽」、「ルイーダの酒場」など多数', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=ニジゲンノモリ(屋外)',
+        key_points: ['アニメテーマパーク', 'アスレチック', 'ジップライン', '自然の中'],
+        rating_family: 5, rating_education: 2, rating_fun: 5, rating_food: 4, rating_uniqueness: 5
+    },
+    {
+        id: 'england_hill',
+        name_jp: '淡路ファームパーク イングランドの丘',
+        weather: ['sun', 'all'], // all because of indoor animal exhibits and experiences
+        type_sun: 'animals', type_all: 'theme_park_mixed',
+        target_audience: ['family_kids', 'animal_lovers', 'experience_seekers'],
+        description_short_jp: 'コアラに会える農業公園！動物ふれあい、収穫体験も。',
+        description_full_jp: 'イギリス湖水地方風の農業公園。コアラやひつじ等との動物ふれあい、野菜収穫体験、パン作り体験、ゴーカートなどが楽しめます。雨天時はコアラ館や手作り体験工房がおすすめ。玉ねぎイベントもユニーク。',
+        activities_sun_jp: '動物ふれあい、野菜収穫体験、屋外遊具、ゴーカート',
+        activities_rain_jp: 'コアラ館・ラビットワーレン見学、手作り体験教室',
+        hours_jp: '9:30～17:00', fee_jp: '大人1,200円他',
+        food_jp: 'ハンバーガーショップあり（島オニオンステーキバーガー等）。', souvenirs_jp: true,
+        image_placeholder: 'https://placehold.co/600x400/a7f3d0/047857?text=イングランドの丘',
+        key_points: ['コアラ', '動物ふれあい', '収穫体験', '手作り体験'],
+        rating_family: 5, rating_education: 3, rating_fun: 4, rating_food: 3, rating_uniqueness: 4
+    }
+];
+
+const spotsGrid = document.getElementById('spots-grid');
+const spotModal = document.getElementById('spot-modal');
+const modalContentInner = document.getElementById('modal-content-inner');
+const filterButtons = document.querySelectorAll('.filter-button');
+const navButtons = document.querySelectorAll('.nav-button');
+const sections = {
+    home: document.getElementById('home-section'),
+    explore: document.getElementById('explore-section'),
+    charts: document.getElementById('charts-section'),
+    food: document.getElementById('food-section'),
+    itineraries: document.getElementById('itineraries-section'),
+};
+const mobileMenuButton = document.getElementById('mobile-menu-button');
+const mobileMenu = document.getElementById('mobile-menu');
+
+let currentFilter = 'all';
+let rainyDayChartInstance, sunnyDayChartInstance, allWeatherRadarChartInstance;
+
+function getAudienceIcon(audience) {
+    if (audience.includes('family') || audience.includes('family_kids')) return '👨‍👩‍👧‍👦';
+    if (audience.includes('couples')) return '💑';
+    if (audience.includes('friends')) return '🧑‍🤝‍🧑';
+    if (audience.includes('anime_fans') || audience.includes('hk_fans')) return '🤩';
+    if (audience.includes('nature_lovers') || audience.includes('plant_lovers')) return '🌳';
+    if (audience.includes('animal_lovers')) return '🐾';
+    if (audience.includes('active_people') || audience.includes('thrill_seekers')) return '🤸';
+    if (audience.includes('gourmet_lovers')) return '🍜';
+    return '👤';
+}
+
+function createSpotCard(spot) {
+    const card = document.createElement('div');
+    card.className = 'spot-card';
+    card.innerHTML = `
+        <img src="${spot.image_placeholder}" alt="${spot.name_jp}" class="w-full h-48 object-cover">
+        <div class="p-5">
+            <h3 class="text-xl font-semibold text-emerald-700 mb-2">${spot.name_jp}</h3>
+            <p class="text-neutral-600 text-sm mb-3">${spot.description_short_jp}</p>
+            <div class="mb-3">
+                ${spot.target_audience.map(aud => `<span class="tag" title="${aud.replace('_', ' ')}">${getAudienceIcon([aud])}</span>`).join('')}
+            </div>
+            <div class="text-xs text-neutral-500">
+                ${spot.weather.includes('rain') ? '<span class="mr-2">☔ 雨OK</span>' : ''}
+                ${spot.weather.includes('sun') ? '<span class="mr-2">☀️ 晴れOK</span>' : ''}
+            </div>
+        </div>
+    `;
+    card.addEventListener('click', () => openModal(spot));
+    return card;
+}
+
+function renderSpots(filter = 'all') {
+    spotsGrid.innerHTML = '';
+    const filteredSpots = spotsData.filter(spot => {
+        if (filter === 'all') return spot.weather.includes('all') || (spot.weather.includes('rain') && spot.weather.includes('sun'));
+        return spot.weather.includes(filter);
+    });
+
+    if (filteredSpots.length === 0) {
+        spotsGrid.innerHTML = `<p class="col-span-full text-center text-neutral-600 py-8">この条件に合うスポットは見つかりませんでした。</p>`;
+        return;
+    }
+    filteredSpots.forEach(spot => {
+        spotsGrid.appendChild(createSpotCard(spot));
+    });
+}
+
+function openModal(spot) {
+    modalContentInner.innerHTML = `
+        <div class="flex justify-between items-start mb-4">
+            <h2 class="text-3xl font-bold text-emerald-700">${spot.name_jp}</h2>
+            <button id="close-modal-button" class="text-neutral-500 hover:text-neutral-700 text-2xl">&times;</button>
+        </div>
+        <img src="${spot.image_placeholder}" alt="${spot.name_jp}" class="w-full h-64 object-cover rounded-lg mb-6 shadow">
+        <div class="prose max-w-none">
+            <p class="text-lg text-neutral-700 mb-4">${spot.description_full_jp}</p>
+            ${spot.activities_rain_jp && spot.weather.includes('rain') ? `<h4>☔ 雨の日の楽しみ方</h4><ul><li>${spot.activities_rain_jp.split(',').map(s => s.trim()).join('</li><li>')}</li></ul>` : ''}
+            ${spot.activities_sun_jp && spot.weather.includes('sun') ? `<h4>☀️ 晴れの日の楽しみ方</h4><ul><li>${spot.activities_sun_jp.split(',').map(s => s.trim()).join('</li><li>')}</li></ul>` : ''}
+            <h4>基本情報</h4>
+            <ul>
+                ${spot.hours_jp ? `<li><strong>営業時間:</strong> ${spot.hours_jp}</li>` : ''}
+                ${spot.fee_jp ? `<li><strong>料金:</strong> ${spot.fee_jp}</li>` : ''}
+                ${spot.food_jp ? `<li><strong>食事:</strong> ${typeof spot.food_jp === 'string' ? spot.food_jp : (spot.food_jp ? 'あり' : '情報なし')}</li>` : ''}
+                ${spot.souvenirs_jp ? `<li><strong>お土産:</strong> ${spot.souvenirs_jp ? 'あり' : '情報なし'}</li>` : ''}
+            </ul>
+            ${spot.key_points && spot.key_points.length > 0 ? `<h4>ここがポイント！</h4><div class="flex flex-wrap gap-2 mb-4">${spot.key_points.map(p => `<span class="tag bg-emerald-100 text-emerald-700">${p}</span>`).join('')}</div>` : ''}
+        </div>
+    `;
+    spotModal.classList.remove('content-hidden', 'opacity-0', 'pointer-events-none');
+    spotModal.classList.add('opacity-100');
+    document.getElementById('close-modal-button').addEventListener('click', closeModal);
+}
+
+function closeModal() {
+    spotModal.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => { // Allow animation to finish
+         spotModal.classList.add('content-hidden');
+    }, 300);
+}
+
+spotModal.addEventListener('click', (event) => {
+    if (event.target === spotModal) {
+        closeModal();
+    }
+});
+
+filterButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        currentFilter = button.dataset.weather;
+        filterButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        renderSpots(currentFilter);
+    });
+});
+
+function switchSection(targetSectionId) {
+    Object.values(sections).forEach(section => section.classList.add('content-hidden'));
+    if (sections[targetSectionId]) {
+        sections[targetSectionId].classList.remove('content-hidden');
+    }
+
+    navButtons.forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.section === targetSectionId) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Close mobile menu after selection
+    if (!mobileMenu.classList.contains('hidden')) {
+        mobileMenu.classList.add('hidden');
+    }
+    window.scrollTo(0,0); // Scroll to top on section change
+}
+
+navButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const targetSection = button.dataset.section;
+        switchSection(targetSection);
+    });
+});
+
+mobileMenuButton.addEventListener('click', () => {
+    mobileMenu.classList.toggle('hidden');
+});
+
+
+function initializeCharts() {
+    const rainySpotTypes = { '体験型施設': 0, 'キャラクター施設': 0, '学び・文化施設': 0, '屋内自然・癒やし': 0, 'グルメ・お土産': 0 };
+    const sunnySpotTypes = { '絶景・自然': 0, '公園・屋外遊び': 0, 'クルーズ体験': 0, '屋外テーマパーク': 0, '動物ふれあい': 0, 'グルメ・お土産': 0 };
+
+    spotsData.forEach(spot => {
+        if (spot.weather.includes('rain')) {
+            if (spot.type_rain === 'experience') rainySpotTypes['体験型施設']++;
+            else if (spot.type_rain === 'character') rainySpotTypes['キャラクター施設']++;
+            else if (spot.type_rain === 'learning') rainySpotTypes['学び・文化施設']++;
+            else if (spot.type_rain === 'nature_indoor') rainySpotTypes['屋内自然・癒やし']++;
+            else if (spot.type_rain === 'food_shop' || spot.type_all === 'food_shop') rainySpotTypes['グルメ・お土産']++;
+        }
+        if (spot.weather.includes('sun')) {
+            if (spot.type_sun === 'scenic') sunnySpotTypes['絶景・自然']++;
+            else if (spot.type_sun === 'park_outdoor') sunnySpotTypes['公園・屋外遊び']++;
+            else if (spot.type_sun === 'cruise') sunnySpotTypes['クルーズ体験']++;
+            else if (spot.type_sun === 'theme_park_outdoor') sunnySpotTypes['屋外テーマパーク']++;
+            else if (spot.type_sun === 'animals') sunnySpotTypes['動物ふれあい']++;
+            else if (spot.type_sun === 'food_shop' || spot.type_all === 'food_shop') sunnySpotTypes['グルメ・お土産']++;
+        }
+    });
+    
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        let label = context.dataset.label || '';
+                        if (label) { label += ': '; }
+                        if (context.parsed.y !== null) { label += context.parsed.y + '件'; }
+                        return label;
+                    }
+                }
+            }
+        },
+        scales: {
+            y: { beginAtZero: true, ticks: { precision: 0 } }
+        }
+    };
+
+    if (rainyDayChartInstance) rainyDayChartInstance.destroy();
+    rainyDayChartInstance = new Chart(document.getElementById('rainyDayChart'), {
+        type: 'bar',
+        data: {
+            labels: Object.keys(rainySpotTypes),
+            datasets: [{
+                label: 'スポット数',
+                data: Object.values(rainySpotTypes),
+                backgroundColor: 'rgba(96, 165, 250, 0.6)', // sky-500
+                borderColor: 'rgba(59, 130, 246, 1)', // sky-600
+                borderWidth: 1
+            }]
+        },
+        options: chartOptions
+    });
+
+    if (sunnyDayChartInstance) sunnyDayChartInstance.destroy();
+    sunnyDayChartInstance = new Chart(document.getElementById('sunnyDayChart'), {
+        type: 'bar',
+        data: {
+            labels: Object.keys(sunnySpotTypes),
+            datasets: [{
+                label: 'スポット数',
+                data: Object.values(sunnySpotTypes),
+                backgroundColor: 'rgba(245, 158, 11, 0.6)', // amber-500
+                borderColor: 'rgba(217, 119, 6, 1)', // amber-600
+                borderWidth: 1
+            }]
+        },
+        options: chartOptions
+    });
+
+    const radarSpots = ['nijigen_indoor', 'england_hill', 'uzunooka', 'onokoro'];
+    const radarData = {
+        labels: ['家族向け度', '学び・文化度', 'エンタメ度', 'グルメ充実度', 'ユニーク度'],
+        datasets: radarSpots.map((spotId, index) => {
+            const spot = spotsData.find(s => s.id === spotId);
+            const colors = [
+                'rgba(239, 68, 68, 0.4)', // red-500
+                'rgba(59, 130, 246, 0.4)', // blue-500
+                'rgba(16, 185, 129, 0.4)', // emerald-500
+                'rgba(245, 158, 11, 0.4)'  // amber-500
+            ];
+            const borderColors = [
+                'rgba(220, 38, 38, 1)', 
+                'rgba(37, 99, 235, 1)',
+                'rgba(5, 150, 105, 1)',
+                'rgba(217, 119, 6, 1)'
+            ];
+            return {
+                label: spot.name_jp,
+                data: [spot.rating_family || 0, spot.rating_education || 0, spot.rating_fun || 0, spot.rating_food || 0, spot.rating_uniqueness || 0],
+                backgroundColor: colors[index % colors.length],
+                borderColor: borderColors[index % borderColors.length],
+                borderWidth: 2,
+                pointBackgroundColor: borderColors[index % borderColors.length],
+                pointRadius: 4,
+                pointHoverRadius: 6
+            };
+        })
+    };
+    if (allWeatherRadarChartInstance) allWeatherRadarChartInstance.destroy();
+    allWeatherRadarChartInstance = new Chart(document.getElementById('allWeatherRadarChart'), {
+        type: 'radar',
+        data: radarData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                     callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) { label += ': '; }
+                            if (context.parsed.r !== null) { label += context.parsed.r; }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                r: {
+                    angleLines: { display: true },
+                    suggestedMin: 0,
+                    suggestedMax: 5,
+                    pointLabels: { font: { size: 12 } },
+                    ticks: { stepSize: 1 }
+                }
+            }
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderSpots(currentFilter);
+    initializeCharts();
+    switchSection('home'); // Default to home section
+});
+
+</script>
+</body>
+</html>
